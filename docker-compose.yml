@@ -1,0 +1,49 @@
+name: pact-demo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pact
+      POSTGRES_PASSWORD: pact
+      POSTGRES_DB: pact_broker
+    volumes:
+      - broker-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pact -d pact_broker"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  pact-broker:
+    image: pactfoundation/pact-broker:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      webhook-sink:
+        condition: service_started
+    ports:
+      - "9292:9292"
+    environment:
+      PACT_BROKER_PORT: "9292"
+      PACT_BROKER_DATABASE_URL: postgres://pact:pact@postgres/pact_broker
+      PACT_BROKER_BASE_URL: http://localhost:9292 http://pact-broker:9292
+      PACT_BROKER_BASIC_AUTH_USERNAME: ${PACT_BROKER_USERNAME:-pact}
+      PACT_BROKER_BASIC_AUTH_PASSWORD: ${PACT_BROKER_PASSWORD:-pact}
+      PACT_BROKER_ALLOW_PUBLIC_READ: "false"
+      PACT_BROKER_WEBHOOK_SCHEME_WHITELIST: http
+      PACT_BROKER_WEBHOOK_HOST_WHITELIST: webhook-sink
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null --header=\"Authorization: Basic $$(printf '%s:%s' \"$$PACT_BROKER_BASIC_AUTH_USERNAME\" \"$$PACT_BROKER_BASIC_AUTH_PASSWORD\" | base64)\" http://127.0.0.1:9292/diagnostic/status/heartbeat || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  webhook-sink:
+    image: mendhak/http-https-echo:latest
+    environment:
+      HTTP_PORT: "8080"
+      DISABLE_REQUEST_LOGS: "false"
+
+volumes:
+  broker-db:
